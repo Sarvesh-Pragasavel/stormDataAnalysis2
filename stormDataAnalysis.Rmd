@@ -1,0 +1,201 @@
+---
+title: "stormDataAnalysis"
+output: pdf_document
+---
+Death, Injury, and Financial Costs of Weather Events
+Synopsis
+In this report we wish to show which types of weather events have caused the most financial and bodily harm in the United States over the last 60 years. As global climent change makes the weather more volatile, our plans for protecting ourselves against the variability of future weather depends on having knowledge about costs of weather in the past. For this report we have used a data base of weather events from NOAA, the National Oceanic & Atmospheric Administration. This data provides descriptions of weather events including number of deaths and injuries as well as estimates of the costs of property and crop damage. The data covers the years 1950 through 2011. Our analysis found that tornadoes cause the most bodily harm, and flooding causes the most property damage.
+
+Data Processing
+knitr::opts_chunk$set(echo = TRUE, results = "hide")
+# Set some variables for the download
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+compressedFile <- "./data/StormData.csv.bz2"
+stormDataFile <- "./data/StormData.csv"
+# load required libraries
+library(plyr)
+library(dplyr)
+## 
+## Attaching package: 'dplyr'
+## 
+## The following objects are masked from 'package:plyr':
+## 
+##     arrange, count, desc, failwith, id, mutate, rename, summarise,
+##     summarize
+## 
+## The following object is masked from 'package:stats':
+## 
+##     filter
+## 
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union
+library(xtable)
+library(stringr)
+library(ggplot2)
+if (!file.exists("./data")) {dir.create("./data")}
+if (! file.exists(compressedFile)) {
+    download.file(fileUrl, destfile = compressedFile, method = "curl")
+    print(paste("downloaded on", date()))
+}
+The data was downloaded from Storm data [47Mb].
+
+There are 902,297 weather events described in this dataset, which includes location, date, and type of the event, as well as a count of fatalities and injuries and an estimate of property and crop damage.
+
+if(!file.exists(stormDataFile)) { unzip(compressedFile)}
+There is a NOAA document describing 48 appropriate names for weather events. In the NOAA data, there are over 900 names for weather events. We have assigned each of the weather events to one of the 48 NOAA event names, adding two events, "No Event" and "Marine Accident" to cover events that did not seem to fit into the NOAA set. The property damage entries in the dataset are encoded as a number plus an exponent. The exponent is a text character, one of K, M, B which stands for thousands, millions, and billions of dollars. The dollar estimates are in dollars at the time of the storm. They have not been adjusted to account for inflation, making them "current" dollars. Some of the exponent entries are other numbers or symbols. They were interpretted as powers of 10. In addition there was a small number of exponent entries that were "h" or "H". Reading the remarks for the events in question, they seemed relatively minor. We choose those entries to be Ks, a typo which would be possible while transcribing from a paper form.
+
+Select the columns we will need for the analysis.
+
+stormData <- read.csv(stormDataFile)
+
+# Make a tidy data set with just the columns we will
+# need for our two questions
+
+# Across the United States, which types of events (as indicated in the `EVTYPE` variable) are most harmful with respect to population health? (FATALITIES & INJURIES)
+# Across the United States, which types of events have the greatest economic consequences? (PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+tidyNOAA <- data.frame(EVTYPE=stormData$EVTYPE, FATALITIES=stormData$FATALITIES, INJURIES=stormData$INJURIES, PROPDMG=stormData$PROPDMG, PROPDMGEXP=stormData$PROPDMGEXP, CROPDMG=stormData$CROPDMG, CROPDMGEXP=stormData$CROPDMGEXP)
+Assign EVTYPE factors to the prescribed set of 48 (plus 2) event type names.
+
+# Make a new EVTYPE column, with the 48 approved NOAA Event types in it, instead of the 985 event types in the original
+
+# make a function to standardize factor names
+repairEventNames <- function(eventLevels, repairedRows, newName, ...) {
+    # collect the rows that match our patterns (...)
+    oldNames <- list(...)
+    rowsToFix <- c()
+    rowsToFix <- unlist(sapply(oldNames, function(x) grep(x, eventLevels)))
+    # Remove those rows that are already fixed, so we don't mess with them
+    rowsToFix <- setdiff(rowsToFix, repairedRows)
+    # Substitute in the "proper" name for these rows
+    eventLevels[rowsToFix] <- newName
+    # and add the newly fixed rows to the set of rows we are done with
+    repairedRows <- union(repairedRows, grep(newName, eventLevels))
+    # return the repaired event list plus the new list of completed rows
+    list(eventLevels, repairedRows)
+}
+
+# Change uppercase letters to all lowercase
+eventLevels <- levels(stormData$EVTYPE)
+cleanEventLevels <- tolower(eventLevels)
+cleanEventLevels <- str_trim(cleanEventLevels)
+repairPair <- list(cleanEventLevels, NULL)
+
+# first do things that are not weather events
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "No Event", "^summary.*", "\\?", "apache county", "none", "northern lights", "other", "no event", "drowning", "metro storm", "southeast", "monthly temperature", "^high$", "mild pattern", "no severe weather")
+
+# next fix marine levels, which often match patterns of later rows
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Marine Thunderstorm Wind", "marine tstm wind", "marine thunderstorm wind")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Marine High Wind", "marine high wind")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Marine Strong Wind", "marine strong wind")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Marine Hail", "marine.*hail")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Marine Accident", "marine.*accident", "marine.*mishap")
+
+# Start going down the list alphabetically, except when things conflict
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Astronomical Low Tide", "astronomical low tide")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Avalanche", "^avalanc")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Blizzard", "^blizzard", "ground blizzard")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "High Surf", "surf", "swells$", "seas$", "high waves", "rogue wave")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Coastal Flood", "^coastal", "high.*tide", "blow-out", "beach flood")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Storm Tide", "storm.*tide", "storm.*surge")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Freezing Fog", "freez.*fog", "ice fog", "fog and cold")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Dense Fog", "fog", "vog")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Dense Smoke", "smoke")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Dust Devil", "dust.*dev")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Dust Storm", "dust")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Frost/Freeze", "frost", "freeze")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Tornado", "^tornado", "torndao", "gustnado")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Waterspout", "wa.*ter.*spout")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Thunderstorm Wind", "^thunde.*w", "^tstm.*w", "^t.*un.*e", "severe thunderstorm", "gusty.*thund.*wind", "thuderstorm wind", "^tstm$", "turbul")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Funnel Cloud", "funnel", "whirlwind", "landspout")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Flash Flood", "^flash")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Lakeshore Flood", "^lake.*flood")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Heavy Rain", "^heavy\\s*rain", "showers", "percip", "precip", "^wet")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Debris Flow", "slide", "slump", ".*rosi.*")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Flood", "^flood", "urban.*flood", "street flood", "snowmelt flooding", "ice jam", "dam failure", "dam break", "flood$", "flooding$", "fldg$", "fld$", "urban.*small", "rising.*water", "small stream", "high water")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Hail", "hail")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Lake-Effect Snow", "lake.*snow")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Heavy Snow", "heavy.*snow", "record winter snow", "ex.*snow")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Lightning", "lightning", "ligntning", "lighting")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Hurricane/Typhoon", "hurricane", "typhoon", "remnants of floyd")            
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Winter Storm", "wint.*storm")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Winter Weather", "wint.*", "black ice", "wint.*mix", "light.*snow", "icy.*road", "^snow", "snow$", "snowfall$", "snows$", "patchy ice", "mix$", "falling snow")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Extreme Cold/Wind Chill", "bitter.*chill", "extreme.*ch", "ex.*cold", "low temperature", "record low")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "High Wind", "^high.*wind", "storm.*wind")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Cold/Wind Chill", "chill", "^cold", "^cool", "cold$", "exposure", "cool$", "cold$", "low temp")
+# This also grabs "ice on road" which I am mostly choosing to not care about
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Ice Storm", "^ice")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Wildfire", "fire")
+# Seiche: A standing-wave oscillation in any enclosed lake which continues after a forcing mechanism has ceased and results in shoreline flooding and/or damage. In the Great Lakes and large inland lakes, large pressure differences, high winds, or fast-moving squall lines may act as the forcing mechanism. In addition, earthquakes or debris flows can initiate a seiche.
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Seiche", "seiche")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Rip Current", "rip")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Sleet", "sleet", "freezing", "glaze", "mixed precipitation")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Tsunami", "tsunami")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Volcanic Ash", "volcan")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Tropical Depression", "tropical.*depression", "wall cloud")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Tropical Storm", "tropical.*storm")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Excessive Heat", "^excessive.*heat", "extreme.*heat", "record.*heat", "temperature record", "record high")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Drought", "^drought", "record low rainfall", "dry", "driest month", "below normal precipitation", "lack of snow", "red flag")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Heat", "heat", "abnormal warmth", "^hot", "hot$", "warm$", "^warm", "warmth", "record.*temp", "unseasonably warm")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Strong Wind", "wind", "burst", "wnd")
+repairPair <- repairEventNames(repairPair[[1]], repairPair[[2]], "Heavy Rain", "rain", "wet$", "^excessive", "shower$")
+
+tidyNOAA$EVTYPE <- mapvalues(tidyNOAA$EVTYPE, from=levels(tidyNOAA$EVTYPE), to=repairPair[[1]])
+Fix the exponent entries and then use them convert the property and crop damage numbers to dollar values.
+
+# Fix the exponents
+# Some of these are clearly wrong. I have no way of knowing how to make them right
+# NOAA advises that K means $1000, M means $1,000,000, and B means $1,000,000,000
+# H I am taking as a typo and they meant K. It is either that or it means 0.
+# The symbols were taken to be 0s and the numbers were taken to be powers of 10.  This is probably wrong, since it leads to damage estimates less than 100 dollars for some events, which do not seem worth recording.
+tidyNOAA$PROPDMGEXP <- as.numeric(mapvalues(tidyNOAA$PROPDMGEXP, from=levels(tidyNOAA$PROPDMGEXP), to=c("0", "0", "0", "0", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "3", "3", "3", "6", "6")))
+tidyNOAA$CROPDMGEXP <- as.numeric(mapvalues(tidyNOAA$CROPDMGEXP, from=levels(tidyNOAA$CROPDMGEXP), to=c("0", "0", "0", "2", "9", "3", "3", "6", "6")))
+
+tidyNOAA$PROPDMG <- tidyNOAA$PROPDMG * 10^tidyNOAA$PROPDMGEXP
+tidyNOAA$CROPDMG <- tidyNOAA$CROPDMG * 10^tidyNOAA$CROPDMGEXP
+Simplify the tidy dataset by removing the EXP columns, which are no longer needed. Save the final tidy dataset to a file.
+
+tidyNOAA <- subset(tidyNOAA, select=c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "CROPDMG"))
+
+write.csv(tidyNOAA, "data/tidyNOAA.csv")
+Results
+Sum the deaths and injuries by weather event type.
+
+# Across the United States, which types of events (as indicated in the `EVTYPE` variable) are most harmful with respect to population health? (FATALITIES & INJURIES)
+healthHarmByType <- ddply(tidyNOAA, .(EVTYPE), summarize, totalFatalities = sum(FATALITIES), totalInjuries = sum(INJURIES))
+Find the events that cause the most deaths and the most injuries and make a table with just those rows.
+
+worstRows <- head(order(healthHarmByType$totalFatalities, decreasing=TRUE), 5)
+worstRows <- union(worstRows, head(order(healthHarmByType$totalInjuries, decreasing=TRUE), 5))
+
+worstHarm <- healthHarmByType[worstRows,]
+
+xthh <- xtable(head(worstHarm),  caption="Top 5 Deadliest or Most Injurious Weather Events")
+Tornadoes cause the most deaths and the most injuries. Thunderstorm Wind and Flood are included in the table because they caused many injuries, even though they did not cause the most deaths.
+
+print(xthh, type= "html")
+Top 5 Deadliest or Most Injurious Weather Events
+EVTYPE  totalFatalities	totalInjuries
+32	Tornado	5658.00	91364.00
+28	Excessive Heat	2018.00	6730.00
+9	Heat	1129.00	2513.00
+3	Flash Flood	1018.00	1785.00
+4	Lightning	817.00	5232.00
+5	Thunderstorm Wind	712.00	9509.00
+Find the total cost to property and crops.
+
+# Across the United States, which types of events have the greatest economic consequences? (PROPDMG, CROPDMG)
+costByType <- ddply(tidyNOAA, .(EVTYPE), summarize, totalCost = sum(PROPDMG + CROPDMG))
+Select the five most costly weather event types.
+
+costByType <- arrange(costByType, desc(totalCost))
+expensive <- head(costByType, 5)
+Reduce the event type factors to just those present in the table
+
+expensive$EVTYPE <- as.character(expensive$EVTYPE)
+expensive$EVTYPE <- factor(expensive$EVTYPE)
+
+ggplot(data=expensive, aes(x=EVTYPE, y=totalCost/10e9)) + geom_bar(stat="identity") + xlab("") + ylab("Billions of US Dollars") + ggtitle("Total Cost of Weather Events, 1950-2011")
+
+
+Since 1950, floods have cost the US the most, followed by hurricanes, tornados.
